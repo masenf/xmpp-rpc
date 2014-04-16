@@ -55,4 +55,4 @@ been created over the years, each one builds on the previous.
 * jabber-notify.pl by Peter Krenesky
 
 As far as I can tell, the above mentioned scripts are licensed BSD, so I've
-chosen to license this script under the BSD 3 clause license (see LICENSE).
+chosen to license this script under the BSD 2 clause license (see LICENSE).
