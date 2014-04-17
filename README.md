@@ -29,20 +29,20 @@ Features
 External dependencies
 =====================
 
-* AnyEvent (http://software.schmorp.de/pkg/AnyEvent.html)
-* AnyEvent::XMPP (http://www.ta-sa.org/net_xmpp2)
+* [AnyEvent](http://software.schmorp.de/pkg/AnyEvent.html)
+* [AnyEvent::XMPP](http://www.ta-sa.org/net_xmpp2)
 
 Debian / Ubuntu
 ---------------
 
-* libanyevent-perl
-* libanyevent-xmpp-perl
+* [libanyevent-perl](https://packages.debian.org/search?keywords=libanyevent-perl)
+* [libanyevent-xmpp-perl](https://packages.debian.org/search?keywords=libanyevent-xmpp-perl)
 
 Arch linux
 ----------
 
-* perl-anyevent (AUR)
-* perl-anyevent-xmpp (AUR)
+* [perl-anyevent](https://www.archlinux.org/packages/extra/any/perl-anyevent/)
+* [perl-anyevent-xmpp](https://www.archlinux.org/packages/community/any/perl-anyevent-xmpp/)
 
 License
 =======
