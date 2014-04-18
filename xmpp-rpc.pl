@@ -526,7 +526,13 @@ sub sig_print_text ($$$) {
 
 	my ($dest, $text, $stripped) = @_;
 	
-	if ($dest->{level} & MSGLEVEL_HILIGHT) {	
+	if ($dest->{level} & MSGLEVEL_HILIGHT) {
+        if ($monitored_channels{$dest->{target}}) {
+            my $ownnick = $dest->{server}->{nick};
+            if ($stripped =~ /$ownnick/) {
+                return;     # monitored channels already notify
+            }
+        }
         my $body = '['.$dest->{target}.'] '.$stripped;
         send_xmpp($body);
 	}
