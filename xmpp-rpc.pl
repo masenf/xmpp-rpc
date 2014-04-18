@@ -413,8 +413,7 @@ sub evt_xmpp_channel_message ($$) {
         # deliver the message
         my $fchan = Irssi::channel_find($channel);
         if ($fchan) {
-            my $server = $fchan->{server};
-            $server->send_message($channel, $inmsg, 0);
+            $fchan->command("msg $channel $inmsg");
             $monitored_channels{$channel}{'last_interaction'} = time;
             return (1, "");
         } else {
