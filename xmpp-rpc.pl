@@ -429,11 +429,15 @@ sub evt_xmpp_private_message ($$) {
     my ($to, $inmsg) = @_;
 
     my $cb = sub {
-        if ($_->[0]) {
+        my $outmsg = $inmsg;
+        if ($_[0]) {
             my ($status, $n, $server) = @_;
-            $server->send_message($to, $inmsg, 1);
+            if ($DEBUG) {
+                Irssi:print("DEBUG: sent private message to $to, $status, $n, $server, $outmsg");
+            }
+            $server->send_message($n, $outmsg, 1);
         } else {
-            send_xmpp($_->[1]);
+            send_xmpp($_[1]);
         }
     };
 
@@ -451,20 +455,28 @@ sub find_nick ($$) {
     my ($nick, $cb) = @_;
     if ($whocvs{$nick})
     {
-        $whocvs{$nick}{cv}->cb ($cb);
+        my @msgqueue = @{$whocvs{$nick}->{q}};
+        push(@msgqueue, $cb);
+#        # this looks wrong, but i'm not sure exactly sure what is right
+#        $whocvs{$nick}{cv}->cb ($cb);
         return;
     }
     my %wwait = { };
     $wwait{cv} = AnyEvent->condvar;
     $wwait{wc} = 0;
+    my @msgqueue = ( );
+    $wwait{q} = \@msgqueue;
     $whocvs{$nick} = \%wwait;
     my $timer = AnyEvent->timer (after => 5, cb => sub {
         $wwait{cv}->send(0, "timed out waiting for servers")
     });
+    push (@msgqueue, $cb);
     $wwait{cv}->cb (sub {
         undef $timer;
-        my @info = shift->recv;;
-        $cb->(@info);
+        my @info = $_[0]->recv;
+        foreach (@{$wwait{q}}) {
+            $_->(@info);
+        }
         delete $whocvs{$nick};
     });
     foreach (Irssi::servers()) {
@@ -548,7 +560,7 @@ sub sig_whois_response ($$$) {
 
     $nick_cache{$n} = $server;
     if ($whocvs{$n}) {
-        $whocvs{$n}->{cv}->send(1, ($n, $server));
+        $whocvs{$n}->{cv}->send(1, $n, $server);
     }
 }
 sub sig_whois_unknown ($$) {
