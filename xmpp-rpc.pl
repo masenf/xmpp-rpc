@@ -429,14 +429,14 @@ sub evt_xmpp_private_message ($$) {
     my ($to, $inmsg) = @_;
 
     my $cb = sub {
-        my $outmsg = $inmsg;
         if ($_[0]) {
             my ($status, $n, $server) = @_;
             if ($DEBUG) {
-                Irssi:print("DEBUG: sent private message to $to, $status, $n, $server, $outmsg");
+                Irssi:print("DEBUG: sent private message to $n, $server, $inmsg");
             }
-            $server->send_message($n, $outmsg, 1);
+            $server->send_message($n, $inmsg, 1);
         } else {
+            # return error response over xmpp
             send_xmpp($_[1]);
         }
     };
@@ -455,16 +455,16 @@ sub find_nick ($$) {
     my ($nick, $cb) = @_;
     if ($whocvs{$nick})
     {
-        my @msgqueue = @{$whocvs{$nick}->{q}};
-        push(@msgqueue, $cb);
-#        # this looks wrong, but i'm not sure exactly sure what is right
-#        $whocvs{$nick}{cv}->cb ($cb);
+        if ($DEBUG) {
+            Irssi:print("DEBUG: already send whois query for $nick, queuing message");
+        }
+        push(@{$whocvs{$nick}->{q}}, $cb);
         return;
     }
     my %wwait = { };
     $wwait{cv} = AnyEvent->condvar;
-    $wwait{wc} = 0;
-    my @msgqueue = ( );
+    $wwait{wc} = 0;     # "wait counter", how many servers are we waiting for
+    my @msgqueue = ( ); # incoming messages to send once a user is found
     $wwait{q} = \@msgqueue;
     $whocvs{$nick} = \%wwait;
     my $timer = AnyEvent->timer (after => 5, cb => sub {
@@ -474,6 +474,7 @@ sub find_nick ($$) {
     $wwait{cv}->cb (sub {
         undef $timer;
         my @info = $_[0]->recv;
+        # execute each callback in the queue
         foreach (@{$wwait{q}}) {
             $_->(@info);
         }
