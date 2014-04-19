@@ -135,7 +135,7 @@ sub thaw_monitored_channels {
 }
 sub debug {
     if ($DEBUG) {
-        Irssi:print("DEBUG: $1");
+        Irssi:print("DEBUG: ". $_[0]);
     }
 }
 
@@ -346,8 +346,8 @@ sub send_xmpp {
         $rcpt = $XMPPRecv;
     }
     if (!$msg) {
-        Irssi:print("BUG: Script attempted to send a blank message")
-        return
+        Irssi:print("BUG: Script attempted to send a blank message");
+        return;
     }
     debug("OUT >$rcpt> $msg");
     $Client->send_message($msg => $rcpt, undef, 'chat');
