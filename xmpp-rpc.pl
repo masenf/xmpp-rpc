@@ -2,31 +2,9 @@
 #
 # This is an irssi script to send out notifications over the network using
 # AnyEvent::XMPP::Client, formerly Net::XMPP2. 
-# Usage:
-# copy script to $HOME/.irssi/scripts
-# load script into irssi: /load xmpp-rpc.pl
-# see detailed usage in irssi: /xirpc
 
 # Please report issues on the project github page
 # http://github.com/masenf/xmpp-rpc
-
-# Currently: 
-#   sends notifications when your name is highlighted
-#   when you receive private messages
-#   when someone on your notify list joins or quits
-#   monitor specified channels for mentions
-#   monitor specified channels for a timeout period after interaction
-#   relay messages from xmpp to the appropriate channel or user
-
-# External dependencies:
-#   AnyEvent (http://software.schmorp.de/pkg/AnyEvent.html)
-#   AnyEvent::XMPP (http://www.ta-sa.org/net_xmpp2)
-# debian / ubuntu (probably derivatives too):
-#   libanyevent-perl
-#   libanyevent-xmpp-perl
-# arch:
-#   perl-anyevent (AUR)
-#   perl-anyevent-xmpp (AUR)
 
 use strict;
 use vars qw($VERSION %IRSSI $AppName $muted
@@ -42,11 +20,11 @@ use MIME::Base64;
 #######################################
 ###     GLOBALS                     ###
 #######################################
-$VERSION = '0.03';
+$VERSION = '0.03dev';
 %IRSSI = (
 	authors		=>	'Masen Furer, based on jabber-notify.pl script by Peter Krenesky, ' .
                     'Based on growl-net.pl script by Alex Mason, Jason Adams' .
-                    'Based on the growl.pl script from Growl.info by Nelson Elhage and Toby Peterson)',
+                    'Based on the growl.pl script from Growl.info by Nelson Elhage)',
 	contact		=>	'mf@0x26.net, masen on irc.freenode.net',
 	name		=>	'XiRPC',
 	description	=>	'XMPP irssi RPC server - control irssi via xmpp',
