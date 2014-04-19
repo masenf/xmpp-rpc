@@ -432,8 +432,7 @@ sub evt_xmpp_private_message ($$) {
             # if any lines get crossed in regards to who calls which callback, hopefully
             # this detail should prevent any messages from going to the wrong user.
             # At worst, the message may not be delivered at all
-            # TODO: use MSG $to $inmsg to echo private messages
-            $server->send_message($to, $inmsg, 1);
+            $server->command("MSG $to $inmsg");
         } else {
             # return error response over xmpp
             send_xmpp($_[1]);
