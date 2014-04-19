@@ -33,8 +33,9 @@ $VERSION = '0.03dev';
 );
 $connected = 0;
 
-# delayed globals come from irssi settings
 sub load_settings {
+    # delayed global variables are loaded after irssi has been 
+    # initializaed
     $DEBUG  	= Irssi::settings_get_bool('xir_debug');
     $XMPPUser 	= Irssi::settings_get_str('xir_notify_user');
     $XMPPPass 	= Irssi::settings_get_str('xir_notify_pass');
@@ -42,9 +43,17 @@ sub load_settings {
     $XMPPPort   = Irssi::settings_get_int('xir_notify_port');
     $XMPPRecv 	= Irssi::settings_get_str('xir_notify_recv');
     $AppName	= "irssi $XMPPServ";
+
+    # unix timestamp of last keypress in irssi (see notify_delay setting)
     $last_cli_interaction = 0;
+
+    # mute status:
+    #  < 0   - not muted
+    # == 0   - muted indefinitely
+    #  > 0   - muted if current timestamp is less than $muted
     $muted = -1;
 
+    # XMPP client connection and callbacks
     $Client = AnyEvent::XMPP::Client->new (debug => 0);
     $Client->add_account($XMPPUser, $XMPPPass, $XMPPServ, $XMPPPort);
     $Client->reg_cb (
@@ -68,8 +77,11 @@ sub load_settings {
         });
 }
 
-# monitored_channels stores state information about channels to notify the user about
+# monitored_channels stores various state information about 
+# which channels to notify the user about. (see (freeze|thaw)_monitored_channels)
 my %monitored_channels = { };
+
+# $usage message is sent to XMPP clients who request /help
 my $usage = <<USAGE;
 accepted commands:
 #channel msg - send message to monitored channel
@@ -79,15 +91,14 @@ accepted commands:
 /mute [timeout] - don't receive any messages
 /unmute - start receiving messages again
 USAGE
+
 # Nick lookup functionality
 # nick cache correlates users and servers
 my %nick_cache = { };
-# whocv will be signaled when there is new whois information
+# whocvs stores condvars and various information per nick
+# $whosvc{$nick}->{cv} will be signaled when there is new whois information
 my %whocvs = { };
 
-#######################################
-###     ONETIME SETUP              ###
-#######################################
 sub create_settings {
     Irssi::settings_add_bool($IRSSI{'name'}, 'xir_show_privmsg', 1);
     Irssi::settings_add_bool($IRSSI{'name'}, 'xir_show_hilight', 1);
@@ -101,12 +112,13 @@ sub create_settings {
     Irssi::settings_add_int($IRSSI{'name'}, 'xir_notify_delay', 0);
     Irssi::settings_add_str($IRSSI{'name'}, 'xir_monitored_channels', '');
 }
+
+# freeze/thaw allows for persisting the list and state of 
+# monitored channels. TODO: make this less opaque to end users
 sub freeze_monitored_channels {
     my $frozen_mc = encode_base64(freeze(\%monitored_channels));
     Irssi::settings_set_str('xir_monitored_channels', $frozen_mc);
-    if ($DEBUG) {
-        Irssi:print("Froze changes as: ".($frozen_mc));
-    }
+    debug("Froze changes as: ".($frozen_mc));
 }
 sub thaw_monitored_channels {
     # attempt to reset monitored channels
@@ -115,12 +127,15 @@ sub thaw_monitored_channels {
         my $thawed_mc = thaw(decode_base64($frozen_mc));
         if ($thawed_mc) {
             %monitored_channels = %{$thawed_mc};
-            if ($DEBUG) {
-                Irssi:print("Restored monitored_channels from deep freeze");
-            }
+            debug("Restored monitored_channels from deep freeze");
         } else {
             Irssi:print("Thawed hashref is undefined $frozen_mc");
         }
+    }
+}
+sub debug {
+    if ($DEBUG) {
+        Irssi:print("DEBUG: $1");
     }
 }
 
@@ -130,6 +145,10 @@ sub thaw_monitored_channels {
 # These functions all return a tuple of (success, message)
 sub shared_xir_monitor
 {
+    # Start monitoring the given channel for mentions. If the
+    # channel is already monitored, set the last_interaction to now
+    # so any new messages delivered before the notify timeout will be
+    # received.
     my ($channel, $notify_timeout) = @_;
 
     # validate input
@@ -141,7 +160,7 @@ sub shared_xir_monitor
     } else {
         return (0, "Unspecified channel");
     }
-    if (!$notify_timeout and $monitored_channels{$channel}) {
+    if (!$notify_timeout && $monitored_channels{$channel}) {
         $notify_timeout = $monitored_channels{$channel};
     }
     if ($notify_timeout <= 0)
@@ -155,12 +174,13 @@ sub shared_xir_monitor
         $ccb{last_interaction} = 0;
         # update global hash table and freeze to settings
         $monitored_channels{$channel} = \%ccb;
+        return (1, "Now monitoring $channel, Notify_timeout = $notify_timeout secs");
     } else {
         $monitored_channels{$channel}{notify_timeout} = $notify_timeout;
         $monitored_channels{$channel}{last_interaction} = time;
+        return (1, "Updated $channel, Notify_timeout = $notify_timeout secs");
     }
     freeze_monitored_channels();
-    return (1, "Now monitoring $channel, Notify_timeout = $notify_timeout secs");
 }
 sub shared_xir_unmonitor ($) 
 {
@@ -177,39 +197,35 @@ sub shared_xir_mute ($)
     my ($timeout) = @_;
     if ($timeout && $timeout > 0) {
         $muted = time + $timeout;
-        if ($DEBUG) {
-            Irssi:print("shared_xir_mute: XMPP notifications muted until $muted");
-        }
+        debug("shared_xir_mute: XMPP notifications muted until $muted");
     } else {
         $muted = 0;
-        if ($DEBUG) {
-            Irssi:print("shared_xir_mute: XMPP notifications muted indefinitely");
-        }
+        debug("shared_xir_mute: XMPP notifications muted indefinitely");
     }
 }
 #######################################
 ###     IRSSI COMMANDS              ###
 #######################################
 sub cmd_xirpc {
-	Irssi::print('%G>>%n XiRPC can be configured with these settings:');
-	Irssi::print('%G>>%n xir_show_privmsg : Notify about private messages.');
-	Irssi::print('%G>>%n xir_show_hilight : Notify when your name is hilighted.');
-	Irssi::print('%G>>%n xir_show_notify : Notify when someone on your away list joins or leaves.');
-	Irssi::print('%G>>%n xir_notify_user : Set to xmpp account to send from.');
-	Irssi::print('%G>>%n xir_notify_recv : Set to xmpp account to receive message.');;
-	Irssi::print('%G>>%n xir_notify_server : Set to the xmpp server host name');
-    Irssi::print('%G>>%n xir_notify_port : Set to xmpp server port');
-	Irssi::print('%G>>%n xir_notify_pass : Set to the sending accounts jabber password');
-    Irssi::print('%G>>%n xir_notify_delay : Wait x seconds since last console interaction before notifying via xmpp');
-	Irssi::print('%G>>%n xir_debug : Display verbose debugging messages');
-	Irssi::print('%G>>%n The following commands expose xmpp-rpc functionality:');
-    Irssi::print('%G>>%n /xir-monitor [<chan>] <notify_timeout> : start monitoring <chan>');
-    Irssi::print('%G>>%n /xir-unmonitor [<chan>] : stop monitoring <chan>');
-    Irssi::print('%G>>%n /xir-status : show current connections and settings');
-    Irssi::print('%G>>%n /xir-reload : pull in new settings and reconnect');
-    Irssi::print('%G>>%n /xir-disconnect');
-    Irssi::print('%G>>%n /xir-connect');
-    Irssi::print('%G>>%n /xir-reconnect');
+	Irssi:print('%G>>%n XiRPC can be configured with these settings (/SET setting value):');
+	Irssi:print('%G>>%n xir_show_privmsg : Notify about private messages.');
+	Irssi:print('%G>>%n xir_show_hilight : Notify when your name is hilighted.');
+	Irssi:print('%G>>%n xir_show_notify : Notify when someone on your away list joins or leaves.');
+	Irssi:print('%G>>%n xir_notify_user : Set to xmpp account to send from.');
+	Irssi:print('%G>>%n xir_notify_recv : Set to xmpp account to receive message.');;
+	Irssi:print('%G>>%n xir_notify_server : Set to the xmpp server host name');
+    Irssi:print('%G>>%n xir_notify_port : Set to xmpp server port');
+	Irssi:print('%G>>%n xir_notify_pass : Set to the sending accounts jabber password');
+    Irssi:print('%G>>%n xir_notify_delay : Wait x seconds since last console interaction before notifying via xmpp');
+	Irssi:print('%G>>%n xir_debug : Display verbose debugging messages');
+	Irssi:print('%G>>%n The following commands expose xmpp-rpc functionality:');
+    Irssi:print('%G>>%n /xir-monitor [<chan>] <notify_timeout> : start monitoring <chan>');
+    Irssi:print('%G>>%n /xir-unmonitor [<chan>] : stop monitoring <chan>');
+    Irssi:print('%G>>%n /xir-status : show current connections and settings');
+    Irssi:print('%G>>%n /xir-reload : pull in new settings and reconnect');
+    Irssi:print('%G>>%n /xir-disconnect');
+    Irssi:print('%G>>%n /xir-connect');
+    Irssi:print('%G>>%n /xir-reconnect');
 }
 sub cmd_xir_notify_test {
     $last_cli_interaction = 0;
@@ -277,9 +293,7 @@ sub cmd_xir_monitor {
     if ($witem && $witem->{type} eq "CHANNEL") {
         $channel = $witem->{name};
     }
-    if ($DEBUG) {
-        Irssi:print("xir-monitor data=" . $data);
-    }
+    debug("xir-monitor data=" . $data);
     if ($data) {
         my @data_items = split(" ", $data);
         if ($#data_items == 1) {
@@ -289,7 +303,7 @@ sub cmd_xir_monitor {
             $notify_timeout = $data_items[0];
         }
     }
-    if ($channel ne "" and $notify_timeout > 0) {
+    if ($channel ne "" && $notify_timeout > 0) {
         my ($success, $msg) = shared_xir_monitor($channel, $notify_timeout);
         Irssi::print("%G>>%n $msg");
     } else {
@@ -303,9 +317,7 @@ sub cmd_xir_unmonitor {
     if ($witem && $witem->{type} eq "CHANNEL") {
         $channel = $witem->{name};
     }
-    if ($DEBUG) {
-        Irssi:print("xir-unmonitor data=" . $data);
-    }
+    debug("xir-unmonitor data=" . $data);
     if ($data) {
         $channel = $data;
     }
@@ -320,7 +332,9 @@ sub cmd_xir_unmonitor {
 #######################################
 sub send_xmpp {
     my ($msg, $rcpt) = @_;
+    # never send messages if we are in a muted state
     return if ($muted == 0 or $muted > time);
+    # don't send XMPP messages if the user is interacting with irssi
     return if (time - $last_cli_interaction < Irssi::settings_get_int('xir_notify_delay'));
 
     if (!$connected) {
@@ -332,11 +346,10 @@ sub send_xmpp {
         $rcpt = $XMPPRecv;
     }
     if (!$msg) {
-        $msg = "";
+        Irssi:print("BUG: Script attempted to send a blank message")
+        return
     }
-    if ($DEBUG) {
-        Irssi:print("OUT >$rcpt> $msg");
-    }
+    debug("OUT >$rcpt> $msg");
     $Client->send_message($msg => $rcpt, undef, 'chat');
 
     return 1;
@@ -344,9 +357,7 @@ sub send_xmpp {
 
 sub evt_incoming_xmpp ($) {
     my ($msg) = @_;
-    if ($DEBUG) {
-        Irssi:print("IN  <" . $msg->from . "> " . $msg->any_body);
-    }
+    debug("IN  <" . $msg->from . "> " . $msg->any_body);
     my ($user, $loc) = split("/", $msg->from);
     if ($user ne $XMPPRecv)
     {
@@ -385,6 +396,8 @@ sub evt_incoming_xmpp ($) {
     }
 }
 sub evt_xmpp_channel_message ($$) {
+    # Relay an XMPP message to the appropriate channel
+    # Only JOINed + monitored channels are eligible
     my ($channel, $inmsg) = @_;
     if (exists $monitored_channels{$channel})
     {
@@ -403,21 +416,32 @@ sub evt_xmpp_channel_message ($$) {
 
 }
 sub evt_xmpp_private_message ($$) {
+    # Relay an XMPP message to the appropriate user
+    # This is the most complex functionality in the script, pay attention
     my ($to, $inmsg) = @_;
 
+    # $cb is the callback that will be fired  either when
+    # a) the user $to has been found: ($status, $nick, $server)
+    # b) all servers have returned error or timed out ($status, $errmsg)
     my $cb = sub {
         if ($_[0]) {
             my ($status, $n, $server) = @_;
-            if ($DEBUG) {
-                Irssi:print("DEBUG: sent private message to $n, $server, $inmsg");
-            }
-            $server->send_message($n, $inmsg, 1);
+            debug("sent private message to $to, $server, $inmsg");
+            # the cb closes over $to and $inmsg, so the message and recipient 
+            # are implicitly passed with the callback
+            # if any lines get crossed in regards to who calls which callback, hopefully
+            # this detail should prevent any messages from going to the wrong user.
+            # At worst, the message may not be delivered at all
+            # TODO: use MSG $to $inmsg to echo private messages
+            $server->send_message($to, $inmsg, 1);
         } else {
             # return error response over xmpp
             send_xmpp($_[1]);
         }
     };
 
+    # we need to determine which server the given nick is connected to
+    # first check the cache, which is updated on incoming messages and whois lookups
     my $server = $nick_cache{$to};
     if (!$server) {
         # do a whois on each connected server to find the user
@@ -429,12 +453,14 @@ sub evt_xmpp_private_message ($$) {
     return (1, "");
 }
 sub find_nick ($$) {
+    # find_nick is responsible to launching WHOIS requests to all connected servers
+    # as well as queuing callbacks to be fired when the WHOIS responses come back
+    # see: sig_whois_response, sig_whois_end, sig_whois_unknown for how these responses
+    # are handled after this function returns
     my ($nick, $cb) = @_;
     if ($whocvs{$nick})
     {
-        if ($DEBUG) {
-            Irssi:print("DEBUG: already send whois query for $nick, queuing message");
-        }
+        debug("already send whois query for $nick, queuing message");
         push(@{$whocvs{$nick}->{q}}, $cb);
         return;
     }
@@ -444,18 +470,20 @@ sub find_nick ($$) {
     my @msgqueue = ( ); # incoming messages to send once a user is found
     $wwait{q} = \@msgqueue;
     $whocvs{$nick} = \%wwait;
+
+    # start 5 second timer for whois queries
     my $timer = AnyEvent->timer (after => 5, cb => sub {
         $wwait{cv}->send(0, "timed out waiting for servers")
     });
     push (@msgqueue, $cb);
     $wwait{cv}->cb (sub {
-        undef $timer;
-        my @info = $_[0]->recv;
+        undef $timer;           # cancel the timer
+        my @info = $_[0]->recv; # pull the details from the ->send() call
         # execute each callback in the queue
         foreach (@{$wwait{q}}) {
             $_->(@info);
         }
-        delete $whocvs{$nick};
+        delete $whocvs{$nick};  # we are not waiting for this nick anymore
     });
     foreach (Irssi::servers()) {
         $wwait{wc}++;
@@ -467,6 +495,8 @@ sub find_nick ($$) {
 ###     IRSSI SIGNALS               ###
 #######################################
 sub sig_message_public ($$$$$) {
+    # Handler for relaying messages from monitored channels
+
     my ($server, $data, $nick, $address, $target) = @_;
     return unless (exists $monitored_channels{$target});
 
@@ -475,9 +505,7 @@ sub sig_message_public ($$$$$) {
     if ($data =~ /$ownnick/) {
         # this message mentions us
         $monitored_channels{$target}{'last_interaction'} = time;
-        if ($DEBUG) {
-            Irssi:print("DEBUG: we got mentioned in $target");
-        }
+        debug("we got mentioned in $target");
     } else {
         $interact_interval = time - $monitored_channels{$target}{'last_interaction'};
     }
@@ -485,9 +513,7 @@ sub sig_message_public ($$$$$) {
     if ($interact_interval < $notify_timeout) {
         send_xmpp("[$target] < $nick> $data");
     } else {
-        if ($DEBUG) {
-            Irssi:print("DEBUG: skipping message in $target because notify_timeout ($notify_timeout) has been exceeded: $interact_interval");
-        }
+        debug("skipping message in $target because notify_timeout ($notify_timeout) has been exceeded: $interact_interval");
     }
 }
 
@@ -499,6 +525,7 @@ sub sig_message_private ($$$$) {
 }
 
 sub sig_print_text ($$$) {
+    # Handler for relaying messages which contain hilight property
 	return unless Irssi::settings_get_bool('xir_show_hilight');
 
 	my ($dest, $text, $stripped) = @_;
@@ -533,31 +560,34 @@ sub sig_notify_left ($$$$$$) {
     send_xmpp($body);
 }
 sub sig_gui_key_pressed ($) {
+    # Used for tracking irssi interaction to avoid double notifies
     $last_cli_interaction = time;
 }
 sub sig_whois_response ($$$) {
+    # signal is fired when a user is definitely found on a server
     my ($server, $data, $server_name) = @_;
     my ($me, $n, $u, $h) = split(" ", $data);
-    if ($DEBUG) {
-        Irssi:print("sig_whois_response: $me, $n, $u, $h, " . $server->{tag});
-    }
+    debug("sig_whois_response: $me, $n, $u, $h, " . $server->{tag});
 
+    # store the nick -> server mapping
     $nick_cache{$n} = $server;
+    # fire the find_nick callback
     if ($whocvs{$n}) {
         $whocvs{$n}->{cv}->send(1, $n, $server);
     }
 }
 sub sig_whois_unknown ($$) {
+    # signal is fired when a user is explicitly not found, or
+    # if at the end of a whois response, we got no information about the user
     my ($server, $data) = @_;
     my ($me, $n, $ss) = split(" ", $data);
-    if ($DEBUG) {
-        Irssi:print("sig_whois_unknown: $n, " . $server->{tag});
-    }
+    debug("sig_whois_unknown: $n, " . $server->{tag});
 
     if ($whocvs{$n}) {
-        $whocvs{$n}->{wc}--;
+        $whocvs{$n}->{wc}--;            # waiting for one less server response
         if ($whocvs{$n}->{wc} <= 0)
         {
+            # if this was the last server, then we didn't find the user anywhere
             $whocvs{$n}->{cv}->send(0, "no such nick found");
         }
     }
@@ -601,4 +631,4 @@ load_settings();
 thaw_monitored_channels();
 $Client->start;
 
-Irssi::print('%G>>%n '.$IRSSI{name}.' '.$VERSION.' loaded (/xirpc for help. /xir-test to test.)');
+Irssi:print('%G>>%n '.$IRSSI{name}.' '.$VERSION.' loaded (/xirpc for help. /xir-test to test.)');
