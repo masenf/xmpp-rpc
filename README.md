@@ -50,9 +50,9 @@ License
 This script is the result of several derivations of similar scripts that have 
 been created over the years, each one builds on the previous.
 
-* growl.pl script from Growl.info by Nelson Elhage and Toby Peterson
-* growl-net.pl script by Alex Mason, Jason Adams
-* jabber-notify.pl by Peter Krenesky
+* growl.pl script from Growl.info by Nelson Elhage (Not supported)
+* [growl-net.pl](http://random.axman6.com/blog/?page_id=65) script by Alex Mason, Jason Adams
+* [jabber-notify.pl](http://blogs.osuosl.org/kreneskyp/2009/06/02/irssi-notifications-via-xmpp/) by Peter Krenesky
 
 As far as I can tell, the above mentioned scripts are licensed BSD, so I've
 chosen to license this script under the BSD 2 clause license (see LICENSE).
