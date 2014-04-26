@@ -181,13 +181,16 @@ sub shared_xir_monitor
         $ccb{last_interaction} = 0;
         # update global hash table and freeze to settings
         $monitored_channels{$channel} = \%ccb;
+        freeze_monitored_channels();
         return (1, "Now monitoring $channel, Notify_timeout = $notify_timeout secs");
     } else {
-        $monitored_channels{$channel}{notify_timeout} = $notify_timeout;
+        if ($notify_timeout != $monitored_channels{$channel}{notify_timeout}) {
+            $monitored_channels{$channel}{notify_timeout} = $notify_timeout;
+            freeze_monitored_channels();
+        }
         $monitored_channels{$channel}{last_interaction} = time;
         return (1, "Updated $channel, Notify_timeout = $notify_timeout secs");
     }
-    freeze_monitored_channels();
 }
 sub shared_xir_unmonitor ($) 
 {
