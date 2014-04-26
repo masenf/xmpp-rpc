@@ -20,7 +20,7 @@ use MIME::Base64;
 #######################################
 ###     GLOBALS                     ###
 #######################################
-$VERSION = '0.03dev';
+$VERSION = '0.0.3dev';
 %IRSSI = (
 	authors		=>	'Masen Furer, based on jabber-notify.pl script by Peter Krenesky, ' .
                     'Based on growl-net.pl script by Alex Mason, Jason Adams' .
