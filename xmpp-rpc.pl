@@ -160,10 +160,17 @@ sub shared_xir_monitor
     } else {
         return (0, "Unspecified channel");
     }
-    if (!$notify_timeout && $monitored_channels{$channel}) {
-        $notify_timeout = $monitored_channels{$channel};
+    if (!defined $notify_timeout) {
+        if ($monitored_channels{$channel}) {
+            # resetting the last_interaction timer on a previously
+            # monitored channel, keep the previous notify timeout
+            $notify_timeout = $monitored_channels{$channel}{notify_timeout};
+        } else {
+            # newly monitored channel, use default notify timeout of 0
+            $notify_timeout = 0;
+        }
     }
-    if ($notify_timeout <= 0)
+    if ($notify_timeout < 0)
     {
         return (0, "Notify timeout must be greater than 0");
     }
@@ -219,7 +226,7 @@ sub cmd_xirpc {
     Irssi:print('%G>>%n xir_notify_delay : Wait x seconds since last console interaction before notifying via xmpp');
 	Irssi:print('%G>>%n xir_debug : Display verbose debugging messages');
 	Irssi:print('%G>>%n The following commands expose xmpp-rpc functionality:');
-    Irssi:print('%G>>%n /xir-monitor [<chan>] <notify_timeout> : start monitoring <chan>');
+    Irssi:print('%G>>%n /xir-monitor [<chan>] [<notify_timeout>] : start monitoring <chan>');
     Irssi:print('%G>>%n /xir-unmonitor [<chan>] : stop monitoring <chan>');
     Irssi:print('%G>>%n /xir-status : show current connections and settings');
     Irssi:print('%G>>%n /xir-reload : pull in new settings and reconnect');
@@ -288,7 +295,7 @@ sub cmd_xir_reload {
 sub cmd_xir_monitor {
     my ($data, $server, $witem) = @_;
     my $channel = "";
-    my $notify_timeout = 0;
+    my $notify_timeout = undef;
 
     if ($witem && $witem->{type} eq "CHANNEL") {
         $channel = $witem->{name};
@@ -297,17 +304,33 @@ sub cmd_xir_monitor {
     if ($data) {
         my @data_items = split(" ", $data);
         if ($#data_items == 1) {
+            # two arguments: channel, notify_timeout
             $channel = $data_items[0];
             $notify_timeout = $data_items[1];
         } elsif ($#data_items == 0) {
-            $notify_timeout = $data_items[0];
+            # one argument: 
+            if ($data_items[0] =~ /^[0-9]+$/) {
+                # if its numeric, then it must be a notify timeout
+                # for current channel
+                $notify_timeout = $data_items[0];
+            } else {
+                # otherwise it's a channel specification with
+                # the default notify timeout of 0
+                $channel = $data_items[0];
+            }
         }
     }
-    if ($channel ne "" && $notify_timeout > 0) {
-        my ($success, $msg) = shared_xir_monitor($channel, $notify_timeout);
+    if ($channel eq "") {
+        # the error message returned from shared_xir_monitor for a 
+        # missing channel doesn't make sense in all places /xir-monitor 
+        # can be used. 
+        # Hint the user that they must specify a channel in this context
+        Irssi::print("Usage: /xir-monitor <#chan> [<notify_timeout>]");
+        return;
+    }
+    my ($success, $msg) = shared_xir_monitor($channel, $notify_timeout);
+    if ($msg) {
         Irssi::print("%G>>%n $msg");
-    } else {
-        Irssi::print("Usage: /xir-monitor [<chan>] <notify_timeout>");        
     }
 }
 sub cmd_xir_unmonitor {
@@ -381,8 +404,8 @@ sub evt_incoming_xmpp ($) {
         shared_xir_mute($1);
     } elsif ($body =~ /\/unmute/i) {
         cmd_xir_unmute();
-    } elsif ($body =~ /\/monitor\s(\S+)\s([0-9]+)?$/i) {
-        ($success, $outmsg) = shared_xir_monitor($1, $2);
+    } elsif ($body =~ /\/monitor\s(\S+)(\s([0-9]+))?$/i) {
+        ($success, $outmsg) = shared_xir_monitor($1, $3);
     } elsif ($body =~ /\/unmonitor\s(\S+)$/i) {
         shared_xir_unmonitor($1);
     } else {
@@ -509,7 +532,7 @@ sub sig_message_public ($$$$$) {
         $interact_interval = time - $monitored_channels{$target}{'last_interaction'};
     }
     my $notify_timeout = $monitored_channels{$target}{'notify_timeout'};
-    if ($interact_interval < $notify_timeout) {
+    if ($notify_timeout == 0 | $interact_interval < $notify_timeout) {
         send_xmpp("[$target] < $nick> $data");
     } else {
         debug("skipping message in $target because notify_timeout ($notify_timeout) has been exceeded: $interact_interval");
