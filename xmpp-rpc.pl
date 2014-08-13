@@ -217,6 +217,7 @@ sub shared_xir_mute ($)
 ###     IRSSI COMMANDS              ###
 #######################################
 sub cmd_xirpc {
+	Irssi:print('%G>>%n '.$IRSSI{name}.' '.$VERSION);
 	Irssi:print('%G>>%n XiRPC can be configured with these settings (/SET setting value):');
 	Irssi:print('%G>>%n xir_show_privmsg : Notify about private messages.');
 	Irssi:print('%G>>%n xir_show_hilight : Notify when your name is hilighted.');
@@ -271,6 +272,7 @@ sub cmd_xir_status {
     Irssi:print("xir_show_hilight = " . Irssi::settings_get_bool('xir_show_hilight'));
     Irssi:print("xir_show_privmsg = " . Irssi::settings_get_bool('xir_show_privmsg'));
     Irssi:print("xir_show_notify = " . Irssi::settings_get_bool('xir_show_notify'));
+    Irssi:print("xir_notify_delay = " . Irssi::settings_get_str('xir_notify_delay'));
     Irssi:print("monitored channels: ");
     foreach (keys %monitored_channels) {
         Irssi:print("  $_ " . $monitored_channels{$_}{'notify_timeout'});
@@ -360,8 +362,13 @@ sub send_xmpp {
     my ($msg, $rcpt) = @_;
     # never send messages if we are in a muted state
     return if ($muted == 0 or $muted > time);
+
     # don't send XMPP messages if the user is interacting with irssi
-    return if (time - $last_cli_interaction < Irssi::settings_get_int('xir_notify_delay'));
+    my $cli_interact_interval = time - $last_cli_interaction;
+    if ($cli_interact_interval < Irssi::settings_get_int('xir_notify_delay')) {
+        debug("skipping notification because last_cli_interaction has occured $cli_interact_interval seconds ago");
+        return 0;
+    }
 
     if (!$connected) {
         Irssi:print("%G>>%n Not connected to XMPP server, try /xmpp-connect");
@@ -526,14 +533,12 @@ sub sig_message_public ($$$$$) {
     return unless (exists $monitored_channels{$target});
 
     my $ownnick = $server->{nick};
-    my $interact_interval = 0;
     if ($data =~ /$ownnick/) {
         # this message mentions us
         $monitored_channels{$target}{'last_interaction'} = time;
         debug("we got mentioned in $target");
-    } else {
-        $interact_interval = time - $monitored_channels{$target}{'last_interaction'};
     }
+    my $interact_interval = time - $monitored_channels{$target}{'last_interaction'};
     my $notify_timeout = $monitored_channels{$target}{'notify_timeout'};
     if ($notify_timeout == 0 | $interact_interval < $notify_timeout) {
         send_xmpp("[$target] < $nick> $data");
