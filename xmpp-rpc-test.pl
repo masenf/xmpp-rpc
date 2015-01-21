@@ -77,7 +77,7 @@ sub test_setup {
 
     # get configuration values from environment
     $opt->{nick} = "xmpp-test-" . int(rand(5000));
-    $opt->{channel} = "xmpp-tchan-" . int(rand(5000));
+    $opt->{channel} = "#xmpp-tchan-" . int(rand(5000));
     $opt->{nick_target} = Irssi::active_server()->{nick};
     $opt->{server} = Irssi::active_server()->{address};
     $opt->{port} = Irssi::active_server()->{port};
@@ -96,6 +96,9 @@ sub test_setup {
         Irssi:print("ERROR: specify a password for " . $opt->{xmpp_user} . " with /SET xir_test_xmpp_pass <password>");
         return;
     }
+
+    # tell irssi to join the channel first
+    Irssi::Server::channels_join(Irssi::active_server(), $opt->{channel}, 1);
 
     $IRCClient = AnyEvent::IRC::Client->new();
     $IRCClient->reg_cb(
@@ -181,21 +184,51 @@ sub test_priv_msg_notify {
     my $msgbody = "test privmsg notify";
     my $ownnick = $opt->{nick};
     my $target_nick = $opt->{nick_target};
+    my $prev_setting = Irssi::settings_get_bool('xir_show_privmsg');
+    Irssi::settings_set_bool('xir_show_privmsg', 1);
     my $testcv = AnyEvent->condvar;
     my $timer = AnyEvent->timer (after => 10, cb => sub {
         $testcv->send(0, "Timed out")
     });
     $testcv->cb (sub {
         undef $timer;
+        Irssi::settings_set_bool('xir_show_privmsg', $prev_setting);
         my ($success, $msg) = $_[0]->recv;       # wait for results
         finish_test($success, $msg, $summary);
-        undef $xmpp_msg;
     });
     $xmpp_msg = sub {
         my $msg = shift;
         if ($msg =~ /\[pm\] < $ownnick> $msgbody/)
         {
             $testcv->send(1, "Message received");
+        } else {
+            $testcv->send(0, "Message didn't match regex: $msg");
+        }
+    };
+    $IRCClient->send_srv(PRIVMSG => $target_nick, $msgbody);
+}
+sub test_priv_msg_notify_disabled {
+    my $summary = "(Disabled) Receive XMPP notification for private message in irssi";
+    my $msgbody = "test privmsg notify disabled";
+    my $ownnick = $opt->{nick};
+    my $target_nick = $opt->{nick_target};
+    my $prev_setting = Irssi::settings_get_bool('xir_show_privmsg');
+    Irssi::settings_set_bool('xir_show_privmsg', 0);
+    my $testcv = AnyEvent->condvar;
+    my $timer = AnyEvent->timer (after => 10, cb => sub {
+        $testcv->send(1, "No Message received")
+    });
+    $testcv->cb (sub {
+        undef $timer;
+        Irssi::settings_set_bool('xir_show_privmsg', $prev_setting);
+        my ($success, $msg) = $_[0]->recv;       # wait for results
+        finish_test($success, $msg, $summary);
+    });
+    $xmpp_msg = sub {
+        my $msg = shift;
+        if ($msg =~ /\[pm\] < $ownnick> $msgbody/)
+        {
+            $testcv->send(0, "Message received when setting disabled");
         } else {
             $testcv->send(0, "Message didn't match regex: $msg");
         }
@@ -216,7 +249,6 @@ sub test_priv_msg_relay {
         undef $timer;
         my ($success, $msg) = $_[0]->recv;       # wait for results
         finish_test($success, $msg, $summary);
-        undef $irc_private;
     });
     $irc_private = sub {
         my ($nick, $msg) = @_;
@@ -231,6 +263,67 @@ sub test_priv_msg_relay {
     Irssi:print("DEBUG: sending xmpp message to $target_xmpp");
     $XMPPClient->send_message("/msg $ownnick $msgbody" => $target_xmpp, undef, 'chat');
 }
+sub test_public_msg_hilight {
+    my $summary = "Notify via XMPP on hilighted message";
+    my $ownnick = $opt->{nick};
+    my $target_nick = $opt->{nick_target};
+    my $target_xmpp = $opt->{xmpp_target};
+    my $msgbody = "$target_nick: test publicmsg hilight";
+    my $prev_setting = Irssi::settings_get_bool('xir_show_hilight');
+    Irssi::settings_set_bool('xir_show_hilight', 1);
+    my $testcv = AnyEvent->condvar;
+    my $timer = AnyEvent->timer (after => 10, cb => sub {
+        $testcv->send(0, "Timed out")
+    });
+    $testcv->cb (sub {
+        undef $timer;
+        Irssi::settings_set_bool('xir_show_hilight', $prev_setting);
+        my ($success, $msg) = $_[0]->recv;       # wait for results
+        finish_test($success, $msg, $summary);
+    });
+    $xmpp_msg = sub {
+        my $msg = shift;
+        if ($msg =~ /\[$opt->{channel}\] < $ownnick> $msgbody/)
+        {
+            $testcv->send(1, "Message received");
+        } else {
+            $testcv->send(0, "Message didn't match regex: $msg");
+        }
+    };
+    my $channel = $opt->{channel};
+    $IRCClient->send_chan($channel, PRIVMSG => $channel, $msgbody);
+}
+sub test_public_msg_hilight_disabled {
+    my $summary = "(Disabled) Notify via XMPP on hilighted message";
+    my $ownnick = $opt->{nick};
+    my $target_nick = $opt->{nick_target};
+    my $target_xmpp = $opt->{xmpp_target};
+    my $msgbody = "$target_nick: test publicmsg hilight disabled";
+    my $prev_setting = Irssi::settings_get_bool('xir_show_hilight');
+    Irssi::settings_set_bool('xir_show_hilight', 0);
+    my $testcv = AnyEvent->condvar;
+    my $timer = AnyEvent->timer (after => 10, cb => sub {
+        $testcv->send(1, "No Message Received")
+    });
+    $testcv->cb (sub {
+        undef $timer;
+        Irssi::settings_set_bool('xir_show_hilight', $prev_setting);
+        my ($success, $msg) = $_[0]->recv;       # wait for results
+        finish_test($success, $msg, $summary);
+    });
+    $xmpp_msg = sub {
+        my $msg = shift;
+        if ($msg =~ /\[$opt->{channel}\] < $ownnick> $msgbody/)
+        {
+            $testcv->send(0, "Message received when setting disabled");
+        } else {
+            $testcv->send(0, "Message didn't match regex: $msg");
+        }
+    };
+    my $channel = $opt->{channel};
+    $IRCClient->send_chan($channel, PRIVMSG => $channel, $msgbody);
+}
+
 ################
 ### TEST HARNESS
 ################
@@ -250,6 +343,9 @@ sub start_tests {
 sub next_test {
     if ($running && @test_queue) {
         my $next_test = pop(@test_queue);
+        # unregister old callbacks before next test
+        undef $xmpp_msg;
+        undef $irc_private;
         &{$next_test}();
     } else {
         finish_tests();
@@ -278,8 +374,11 @@ sub finish_tests {
 }
 sub make_test_set {
     @test_queue = ( );
+    push(@test_queue, \&test_priv_msg_notify_disabled);
     push(@test_queue, \&test_priv_msg_notify);
     push(@test_queue, \&test_priv_msg_relay);
+    push(@test_queue, \&test_public_msg_hilight_disabled);
+    push(@test_queue, \&test_public_msg_hilight);
 }
 sub request_test_stop {
     $running = 0;
