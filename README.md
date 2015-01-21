@@ -26,11 +26,19 @@ Features
 * monitor specified channels for a timeout period after interaction
 * relay messages from xmpp to the appropriate channel or user
 
+Running Tests
+=============
+
+  /load xmpp-rpc.pl
+  /load xmpp-rpc-test.pl
+  /xir-run-tests
+
 External dependencies
 =====================
 
 * [AnyEvent](http://software.schmorp.de/pkg/AnyEvent.html)
 * [AnyEvent::XMPP](http://www.ta-sa.org/net_xmpp2)
+* [AnyEvent::IRC](http://search.cpan.org/~elmex/AnyEvent-IRC-0.97/lib/AnyEvent/IRC.pm) (Test only)
 
 Debian / Ubuntu
 ---------------
