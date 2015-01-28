@@ -18,13 +18,13 @@ use strict;
 use warnings;
 use vars qw($VERSION %IRSSI $IRCClient $XMPPClient $irc_public $irc_private $xmpp_msg $clients_ready $running);
 use utf8;
- 
+
 use AnyEvent;
 use AnyEvent::IRC::Client;
 use AnyEvent::XMPP::Client;
 use Encode;
 use Data::Dumper;
- 
+
 $VERSION = '0.0.4dev';
 %IRSSI = (
 	authors		=>	'Masen Furer, based on jabber-notify.pl script by Peter Krenesky, ' .
@@ -52,6 +52,23 @@ my @test_queue = ( );
 $clients_ready = 0;
 $running = 0;
 
+sub debug {
+#    Irssi:print("[DEBUG]  " . $_[0]);
+    return;
+}
+sub notice {
+    Irssi:print("[NOTICE] " . $_[0]);
+}
+sub error {
+    Irssi:print("[ERROR]  " . $_[0]);
+}
+sub fail {
+    Irssi:print("[ FAIL ] " . $_[0]);
+}
+sub pass {
+    Irssi:print("[ PASS ] " . $_[0]);
+}
+
 sub connect_irc {
     my ($irc, $data) = @_;
     my $opt = {};
@@ -63,7 +80,7 @@ sub connect_irc {
 }
 sub test_setup {
     if ($running) {
-        Irssi:print("Test cases already running, try /xir-stop-tests");
+        notice("Test cases already running, try /xir-stop-tests");
         return;
     }
     $running = 1;
@@ -71,7 +88,7 @@ sub test_setup {
 
     my $active_server = Irssi::active_server();
     if (!defined $active_server) {
-        Irssi:print("ERROR: connect to an IRC server suitable for testing first");
+        error("connect to an IRC server suitable for testing first");
         return
     }
 
@@ -89,15 +106,15 @@ sub test_setup {
     $opt->{xmpp_pass} = Irssi::settings_get_str('xir_test_xmpp_pass');
 
     if ($opt->{xmpp_target} eq "") {
-        Irssi:print("ERROR: please load and configure xmpp-rpc.pl first");
+        error("please load and configure xmpp-rpc.pl first");
         return;
     }
     if ($opt->{xmpp_pass} eq "") {
-        Irssi:print("ERROR: specify a password for " . $opt->{xmpp_user} . " with /SET xir_test_xmpp_pass <password>");
+        error("specify a password for " . $opt->{xmpp_user} . " with /SET xir_test_xmpp_pass <password>");
         return;
     }
 
-    # tell irssi to join the channel first
+    # tell irssi to join the channel first (ensure that it exists on the server)
     Irssi::Server::channels_join(Irssi::active_server(), $opt->{channel}, 1);
 
     $IRCClient = AnyEvent::IRC::Client->new();
@@ -105,11 +122,11 @@ sub test_setup {
         connect => sub {
                 my ($irc, $error) = @_;
                 if ( defined $error ) {
-                    warn "Can't connect: $error";            
+                    warn "Can't connect: $error";
                 }
         },
         registered => sub {
-                Irssi:print("IRC: Registered connection to " . $_[0]->{host});
+                debug("IRC: Registered connection to " . $_[0]->{host});
                 $IRCClient->send_srv( JOIN => $opt->{channel} ) if $opt->{channel};
                 $clients_ready += 1;
                 start_tests();
@@ -118,7 +135,7 @@ sub test_setup {
             my ($irc, $channel, $msg) = @_;
             my $comment = decode($opt->{charset}, $msg->{params}->[1]);
             my ($username) = $msg->{prefix} =~ /^(\S+?)!/;
-            Irssi:print("DEBUG: received irc public message: $channel $username $comment");
+            debug("IRC: public message: $channel $username $comment");
             if (defined $irc_public) {
                 &{ $irc_public }($channel, $username, $comment);
             }
@@ -131,45 +148,44 @@ sub test_setup {
             {
                 $username = $1;
             }
-            Irssi:print("DEBUG: received irc private message: ($username) $comment");
+            debug("IRC: private message: ($username) $comment");
             if (defined $irc_private) {
                 &{ $irc_private }($username, $comment);
             }
         },
         disconnect => sub {
             my ($irc, $msg) = @_;
-            Irssi:print("IRC: Disconnected from " . $irc->{host} . ": $msg");
+            debug("IRC: Disconnected from " . $irc->{host} . ": $msg");
             $clients_ready -= 1;
         },
         error => sub {
             my ($code, $msg, $ircmsg) = @_;
-            Irssi:print("ERROR $code: IRC client got error: $msg ($ircmsg)");
+            error("IRC: $code: $msg ($ircmsg)");
         }
     );
     connect_irc($IRCClient, $opt);
 
     $XMPPClient = AnyEvent::XMPP::Client->new (debug => 0);
-    Irssi:print("XMPPUser = ". $opt->{xmpp_user});
     $XMPPClient->add_account($opt->{xmpp_user}, $opt->{xmpp_pass}, $opt->{xmpp_serv}, $opt->{xmpp_port});
     $XMPPClient->reg_cb (
         session_ready => sub {
             my ($cl, $acc) = @_;
-            Irssi:print ("XMPP: Logged into server " . $opt->{xmpp_serv} . " as " . $opt->{xmpp_user} . ". Ready.");
+            debug("XMPP: Logged into server " . $opt->{xmpp_serv} . " as " . $opt->{xmpp_user} . ". Ready.");
             $clients_ready += 1;
             start_tests();
         },
         disconnect => sub {
             my ($cl, $acc, $h, $p, $reas) = @_;
-            Irssi:print ("XMPP: Disconnected from ($h:$p): $reas");
+            debug("XMPP: Disconnected from ($h:$p): $reas");
             $clients_ready -= 1;
         },
         error => sub {
             my ($cl, $acc, $err) = @_;
-            Irssi:print ("ERROR: " . $err->string );
+            error("XMPP: " . $err->string );
         },
         message => sub {
             my ($cl, $acc, $msg) = @_;
-            Irssi:print("DEBUG: received private message: $msg");
+            debug("XMPP: private message: $msg");
             if (defined $xmpp_msg) {
                 &{ $xmpp_msg }($msg);
             }
@@ -179,6 +195,16 @@ sub test_setup {
 ##############
 ### TEST CASES
 ##############
+#
+# How this works:
+#   * Each test case should provide a summary of *what* is being tested
+#   * Because of how irssi/anyevent work together, all of the test cases
+#     are asynchronous. VERIFICATION MUST HAPPEN in CALLBACKS
+#   * Each test needs to define a cv, and a timeout that fails the test
+#   * Each test *should* override one of the global client callbacks and
+#     do useful validation of the results. This will likely call the cv
+#   * Each test will call finish_test($success, $output_message, $summary)
+#     This will probably be done in the cv
 sub test_priv_msg_notify {
     my $summary = "Receive XMPP notification for private message in irssi";
     my $msgbody = "test privmsg notify";
@@ -260,7 +286,7 @@ sub test_priv_msg_relay {
             $testcv->send(1, "Message received");
         }
     };
-    Irssi:print("DEBUG: sending xmpp message to $target_xmpp");
+    debug("sending xmpp message to $target_xmpp");
     $XMPPClient->send_message("/msg $ownnick $msgbody" => $target_xmpp, undef, 'chat');
 }
 sub test_public_msg_hilight {
@@ -323,16 +349,147 @@ sub test_public_msg_hilight_disabled {
     my $channel = $opt->{channel};
     $IRCClient->send_chan($channel, PRIVMSG => $channel, $msgbody);
 }
+sub test_show_notify_join_part {
+    my $summary = "Notify via XMPP when user on notify list joins and parts";
+    my $friendnick = "xmpp-fr-" . int(rand(5000));
+    my $friendreal = "fr-" . int(rand(5000));
+    my $server_tag = Irssi::active_server()->{tag};
+    my $FriendClient = AnyEvent::IRC::Client->new();
+    my $prev_setting = Irssi::settings_get_bool('xir_show_notify');
+    Irssi::settings_set_bool('xir_show_notify', 1);
+    my $testcv = AnyEvent->condvar;
+    my $timer = AnyEvent->timer (after => 120, cb => sub {
+        $testcv->send(0, "Timed out")
+    });
+    $testcv->cb (sub {
+        undef $timer;
+        $FriendClient->disconnect("Test case complete");
+        Irssi::settings_set_bool('xir_show_notify', $prev_setting);
+        Irssi::Irc::notifylist_remove($friendnick);
+        my ($success, $msg) = $_[0]->recv;       # wait for results
+        finish_test($success, $msg, $summary);
+    });
+    $xmpp_msg = sub {
+        my $msg = shift;
+        if ($msg =~ /<$friendnick!~$friendreal@.+>\nHas joined $server_tag/m)
+        {
+            $FriendClient->disconnect("Join message matched expected regex");
+            # keep waiting for the part message
+        } elsif ($msg =~ /<$friendnick!~$friendreal@.+>\nHas left $server_tag/m)
+        {
+            $testcv->send(1, "Message received");
+        } else {
+            $testcv->send(0, "Message didn't match regex: $msg");
+        }
+    };
+    # add friend to notify list in irssi
+    debug("Notifying for $friendnick, $server_tag");
+    Irssi::Irc::notifylist_add($friendnick, $server_tag, 0, 0);
+    # create a new IRCClient as $friendnick
+    $FriendClient->reg_cb(
+        connect => sub {
+                my ($irc, $error) = @_;
+                #Irssi:print("FriendClient: connected to " . $irc->{host} . ", nick=" . $irc->{nick});
+                if ( defined $error ) {
+                    warn "FriendClient: Can't connect: $error";
+                }
+        },
+        registered => sub {
+                debug("FriendClient: " . $_[0]->{nick} . " Registered connection to " . $_[0]->{host});
+        },
+        disconnect => sub {
+            my ($irc, $msg) = @_;
+            debug("FriendClient: Disconnected from " . $irc->{host} . ": $msg");
+        },
+        error => sub {
+            my ($code, $msg, $ircmsg) = @_;
+            $testcv->send(0, "IRC ERROR $code: FriendClient got error: $msg ($ircmsg)");
+        }
+    );
+    my $f_opts = { "nick" => $friendnick,
+                   "server" => $opt->{server},
+                   "port" => $opt->{port},
+                   "real" => $friendreal,
+                   "user" => $friendreal };
+    connect_irc($FriendClient, $f_opts);
+}
+sub test_show_notify_join_part_disabled {
+    my $summary = "Notify via XMPP when user on notify list joins and parts (disabled)";
+    my $friendnick = "xmpp-fr-" . int(rand(5000));
+    my $friendreal = "fr-" . int(rand(5000));
+    my $server_tag = Irssi::active_server()->{tag};
+    my $FriendClient = AnyEvent::IRC::Client->new();
+    my $prev_setting = Irssi::settings_get_bool('xir_show_notify');
+    Irssi::settings_set_bool('xir_show_notify', 0);
+    my $testcv = AnyEvent->condvar;
+    my $timer = AnyEvent->timer (after => 120, cb => sub {
+        $testcv->send(1, "No messages received")
+    });
+    $testcv->cb (sub {
+        undef $timer;
+        $FriendClient->disconnect("");
+        Irssi::settings_set_bool('xir_show_notify', $prev_setting);
+        Irssi::Irc::notifylist_remove($friendnick);
+        my ($success, $msg) = $_[0]->recv;       # wait for results
+        finish_test($success, $msg, $summary);
+    });
+    $xmpp_msg = sub {
+        # if any messages are received during this test, thats a failure
+        my $msg = shift;
+        if ($msg =~ /<$friendnick!~$friendreal@.+>\nHas joined $server_tag/m)
+        {
+            $testcv->send(0, "Unexpected join message matched regex");
+        } elsif ($msg =~ /<$friendnick!~$friendreal@.+>\nHas left $server_tag/m)
+        {
+            $testcv->send(0, "Unexpected left message matched regex");
+        } else {
+            $testcv->send(0, "Unexpected message: $msg");
+        }
+    };
+    # add friend to notify list in irssi
+    debug("notifying for $friendnick, $server_tag");
+    Irssi::Irc::notifylist_add($friendnick, $server_tag, 0, 0);
+    # create a new IRCClient as $friendnick
+    $FriendClient->reg_cb(
+        connect => sub {
+                my ($irc, $error) = @_;
+                #Irssi:print("FriendClient: connected to " . $irc->{host} . ", nick=" . $irc->{nick});
+                if ( defined $error ) {
+                    warn "FriendClient: Can't connect: $error";
+                }
+        },
+        registered => sub {
+                debug("FriendClient: " . $_[0]->{nick} . " Registered connection to " . $_[0]->{host});
+        },
+        disconnect => sub {
+            my ($irc, $msg) = @_;
+            debug("FriendClient: Disconnected from " . $irc->{host} . ": $msg");
+        },
+        error => sub {
+            my ($code, $msg, $ircmsg) = @_;
+            $testcv->send(0, "IRC ERROR $code: FriendClient got error: $msg ($ircmsg)");
+        }
+    );
+    my $f_opts = { "nick" => $friendnick,
+                   "server" => $opt->{server},
+                   "port" => $opt->{port},
+                   "real" => $friendreal,
+                   "user" => $friendreal };
+    connect_irc($FriendClient, $f_opts);
+    my $irctimer = AnyEvent->timer (after => 50, cb => sub {
+        $FriendClient->disconnect("Closing connection after 50 secs");
+    });
+}
 
 ################
 ### TEST HARNESS
 ################
 sub start_tests {
     if ($clients_ready < 2) {
-        Irssi:print("DEBUG: waiting for clients to initialize");
+        notice("waiting for clients to initialize");
         return;
     }
-    Irssi:print("Starting tests");
+    notice("Starting tests");
     make_test_set();
     $results->{registered} = @test_queue;
     $results->{ok} = 0;
@@ -341,11 +498,13 @@ sub start_tests {
     next_test();
 }
 sub next_test {
+    # unregister old callbacks before next test
+    undef $xmpp_msg;
+    undef $irc_private;
+    undef $irc_public;
+
     if ($running && @test_queue) {
         my $next_test = pop(@test_queue);
-        # unregister old callbacks before next test
-        undef $xmpp_msg;
-        undef $irc_private;
         &{$next_test}();
     } else {
         finish_tests();
@@ -353,7 +512,11 @@ sub next_test {
 }
 sub finish_test {
     my ($success, $msg, $summary) = @_;
-    Irssi:print("$success      $msg      ($summary)");
+    if ($success) {
+        pass("$msg      ($summary)");
+    } else {
+        fail("$success      $msg      ($summary)");
+    }
     $results->{total} += 1;
     if ($success) {
         $results->{ok} += 1;
@@ -364,9 +527,9 @@ sub finish_test {
 }
 sub finish_tests {
     $running = 0;
-    Irssi:print($results->{total} . " / " . $results->{registered} . " tests complete: " . 
-                $results->{ok} . " ok, " .
-                $results->{fail} . " failed.");
+    notice($results->{total} . " / " . $results->{registered} . " tests complete: " .
+           $results->{ok} . " ok, " .
+           $results->{fail} . " failed.");
     $IRCClient->disconnect("tests complete");
     $XMPPClient->disconnect("tests complete");
     undef $IRCClient;
@@ -374,6 +537,8 @@ sub finish_tests {
 }
 sub make_test_set {
     @test_queue = ( );
+    push(@test_queue, \&test_show_notify_join_part_disabled);
+    push(@test_queue, \&test_show_notify_join_part);
     push(@test_queue, \&test_priv_msg_notify_disabled);
     push(@test_queue, \&test_priv_msg_notify);
     push(@test_queue, \&test_priv_msg_relay);
@@ -382,7 +547,7 @@ sub make_test_set {
 }
 sub request_test_stop {
     $running = 0;
-    Irssi:print("Waiting for outstanding tests to finish...");
+    notice("Waiting for outstanding tests to finish...");
 }
 Irssi::command_bind('xir-run-tests', 'test_setup');
 Irssi::command_bind('xir-stop-tests', 'request_test_stop');
